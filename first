@@ -1,0 +1,158 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter_sound/flutter_sound.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+void main() {
+  runApp(const VoiceRecorderApp());
+}
+
+class VoiceRecorderApp extends StatelessWidget {
+  const VoiceRecorderApp({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: VoiceRecorderScreen(),
+    );
+  }
+}
+
+class VoiceRecorderScreen extends StatefulWidget {
+  @override
+  _VoiceRecorderScreenState createState() => _VoiceRecorderScreenState();
+}
+
+class _VoiceRecorderScreenState extends State<VoiceRecorderScreen> {
+  final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
+  List<String> _recordedFiles = [];
+  bool _isRecording = false;
+  String? _currentFilePath;
+
+  @override
+  void initState() {
+    super.initState();
+    _initRecorder();
+    _fetchRecordedFiles();
+  }
+
+  Future<void> _initRecorder() async {
+    await Permission.microphone.request();
+    await Permission.storage.request();
+    await _recorder.openRecorder();
+  }
+
+  Future<String> _generateFilePath() async {
+    final directory = await getApplicationDocumentsDirectory();
+    final path = '${directory.path}/${DateTime.now().millisecondsSinceEpoch}.aac';
+    return path;
+  }
+
+  Future<void> _startRecording() async {
+    _currentFilePath = await _generateFilePath();
+    await _recorder.startRecorder(toFile: _currentFilePath);
+    setState(() {
+      _isRecording = true;
+    });
+  }
+
+  Future<void> _stopRecording() async {
+    await _recorder.stopRecorder();
+    setState(() {
+      _isRecording = false;
+    });
+    _fetchRecordedFiles();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('녹음 완료: $_currentFilePath')),
+    );
+  }
+
+  Future<void> _fetchRecordedFiles() async {
+    final directory = await getApplicationDocumentsDirectory();
+    final files = Directory(directory.path).listSync();
+    setState(() {
+      _recordedFiles = files
+          .where((file) => file.path.endsWith('.aac'))
+          .map((file) => file.path)
+          .toList();
+    });
+  }
+
+  Future<void> _playAudio(String filePath) async {
+    await _recorder.startPlayer(fromURI: filePath);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('재생 중: ${filePath.split('/').last}')),
+    );
+  }
+
+  Widget _buildWaveVisualization() {
+    return StreamBuilder<Food>(
+      stream: _recorder.onProgress,
+      builder: (context, snapshot) {
+        final amplitude = snapshot.data?.inputBuffer?.first.toDouble() ?? 0.0;
+        return LinearProgressIndicator(
+          value: amplitude / 200,
+          backgroundColor: Colors.grey[200],
+          valueColor: AlwaysStoppedAnimation(Colors.blue),
+        );
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _recorder.closeRecorder();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          '음성 녹음 앱',
+          style: GoogleFonts.lato(fontSize: 20),
+        ),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                primary: _isRecording ? Colors.red : Colors.blue,
+                onPrimary: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+              ),
+              onPressed: _isRecording ? _stopRecording : _startRecording,
+              child: Text(_isRecording ? '녹음 중지' : '녹음 시작'),
+            ),
+            const SizedBox(height: 16),
+            if (_isRecording) _buildWaveVisualization(),
+            const Divider(),
+            Expanded(
+              child: ListView.builder(
+                itemCount: _recordedFiles.length,
+                itemBuilder: (context, index) {
+                  final fileName = _recordedFiles[index].split('/').last;
+                  return Card(
+                    child: ListTile(
+                      title: Text(fileName, style: GoogleFonts.roboto(fontSize: 16)),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.play_arrow, color: Colors.green),
+                        onPressed: () => _playAudio(_recordedFiles[index]),
+                      ),
+                      onTap: () => _playAudio(_recordedFiles[index]),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
